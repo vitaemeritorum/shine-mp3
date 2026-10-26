@@ -324,3 +324,39 @@ func TestPart2_3LengthHoldsOnlyCodedBits(t *testing.T) {
 		})
 	}
 }
+
+// A frame is a whole number of bytes, but the bit writer writes out only
+// whole 32-bit words: each frame's last bytes must go out with it, or the
+// stream ends short of its last frame, which Symphonia rejects ("mpa:
+// invalid packet length"). Where frames are not a multiple of four bytes
+// it depends on how many there are, so streams of one to eight are tried.
+func TestWriteEndsOnAWholeFrame(t *testing.T) {
+	for _, c := range testConfigs {
+		t.Run(c.String(), func(t *testing.T) {
+			perFrame := NewEncoder(c.rate, c.channels).samplesPerPass()
+			for n := 1; n <= 8; n++ {
+				frames, _, tail := splitFrames(t, encode(t, c, float64(n)*float64(perFrame)/float64(c.rate)))
+				if tail != 0 {
+					t.Errorf("%d frames: the stream ends %d bytes into the frame after its %d whole ones", n, tail, len(frames))
+				}
+			}
+		})
+	}
+}
+
+// EncodeBufferInterleaved returns each frame whole, and nothing more.
+func TestEncodeBufferInterleavedReturnsAWholeFrame(t *testing.T) {
+	for _, c := range testConfigs {
+		t.Run(c.String(), func(t *testing.T) {
+			enc := NewEncoder(c.rate, c.channels)
+			pcm := testSignal(c, 0.5)
+			step := int(enc.samplesPerPass()) * c.channels
+			for i := 0; i+step <= len(pcm); i += step {
+				data, n := enc.EncodeBufferInterleaved(pcm[i : i+step])
+				if frames, _, tail := splitFrames(t, data[:n]); len(frames) != 1 || tail != 0 {
+					t.Fatalf("frame %d: returned %d whole frames and %d bytes more", i/step, len(frames), tail)
+				}
+			}
+		})
+	}
+}
